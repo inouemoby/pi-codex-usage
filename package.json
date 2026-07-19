@@ -1,0 +1,17 @@
+{
+  "name": "codex-usage",
+  "version": "1.0.0",
+  "description": "OpenAI Codex / ChatGPT subscription usage monitor for pi coding agent. Shows 5h rate-limit window & weekly quota in footer.",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
