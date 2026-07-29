@@ -515,12 +515,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "codex_usage",
     label: "Codex Usage",
-    description: "Check OpenAI Codex / ChatGPT subscription usage: 5-hour rate-limit window, weekly quota with reset times, and remaining credits.",
-    promptSnippet: "Check OpenAI Codex usage (5h window, weekly quota & credits)",
-    promptGuidelines: [
-      "Use codex_usage to check ChatGPT/Codex subscription quota before expensive operations.",
-      "Use codex_usage when the user asks about Codex usage, limits, rate limits, or remaining credits.",
-    ],
+    description: "Get current OpenAI Codex usage.",
     parameters: Type.Object({}),
     async execute() {
       try {
