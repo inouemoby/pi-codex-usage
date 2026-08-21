@@ -17,9 +17,13 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // Refresh the access token 1h before its real expiry (JWT `exp`).
 const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
-// pi's catalogue currently advertises GPT-5.6 Luna as 272K. Keep the
-// override local to this extension so compaction and context display use 512K.
-const LUNA_CONTEXT_WINDOW = 512_000;
+// Keep these overrides local to this extension so compaction and context
+// display use the desired windows for the GPT-5.6 Codex variants.
+const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
+  "gpt-5.6-luna": 1_000_000,
+  "gpt-5.6-sol": 512_000,
+  "gpt-5.6-terra": 512_000,
+};
 
 // ─── Types ───────────────────────────────────────────────────────
 interface RateWindow {
@@ -337,8 +341,9 @@ export default function (pi: ExtensionAPI) {
     if (ctx.model) candidates.push(ctx.model);
     try { candidates.push(...(ctx.modelRegistry?.getAll?.() ?? [])); } catch { /* unavailable during startup */ }
     for (const model of candidates) {
-      if (model?.provider === "openai-codex" && model?.id === "gpt-5.6-luna") {
-        model.contextWindow = LUNA_CONTEXT_WINDOW;
+      if (model?.provider === "openai-codex") {
+        const contextWindow = CODEX_CONTEXT_OVERRIDES[model.id];
+        if (contextWindow !== undefined) model.contextWindow = contextWindow;
       }
     }
   }
