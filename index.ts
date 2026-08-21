@@ -310,6 +310,7 @@ export default function (pi: ExtensionAPI) {
   let usage: UsageData | null = null;
   let footerOn = false;
   let _tui: any = null;
+  let latestCtx: any = null;
   let thinkingLevel = "off";
 
   async function getUsage(): Promise<UsageData> {
@@ -363,7 +364,7 @@ export default function (pi: ExtensionAPI) {
       _tui = tui;
       const unsub = fd.onBranchChange(() => tui.requestRender());
       return {
-        dispose: () => { unsub(); _tui = null; },
+        dispose: () => { unsub(); _tui = null; footerOn = false; },
         invalidate() {},
         render(width: number): string[] {
           const sm = ctx.sessionManager;
@@ -389,11 +390,13 @@ export default function (pi: ExtensionAPI) {
             }
           }
           const parts: string[] = [];
+          const cachePartIndexes: number[] = [];
+          let costPartIndex = -1;
           if (ti) parts.push(`↑${formatTokens(ti)}`);
           if (to) parts.push(`↓${formatTokens(to)}`);
-          if (tr) parts.push(`R${formatTokens(tr)}`);
-          if (tw) parts.push(`W${formatTokens(tw)}`);
-          if (tc) parts.push(`$${tc.toFixed(3)}`);
+          if (tr) { cachePartIndexes.push(parts.length); parts.push(`R${formatTokens(tr)}`); }
+          if (tw) { cachePartIndexes.push(parts.length); parts.push(`W${formatTokens(tw)}`); }
+          if (tc) { costPartIndex = parts.length; parts.push(`$${tc.toFixed(3)}`); }
 
           // Context %
           const cu = ctx.getContextUsage();
@@ -420,25 +423,31 @@ export default function (pi: ExtensionAPI) {
               parts.push(`${flag}wk:${usage.weeklyPercent}%`);
             }
           }
-          const left = parts.join(" ");
-
-          // Right side: model info
+          // Right side: model info. Provider is the first thing omitted when
+          // the line is too wide; cache counters and then cost are removed next.
           const m = ctx.model;
-          let right = m?.id || "no-model";
+          let modelText = m?.id || "no-model";
           if (m?.reasoning) {
             const tl = thinkingLevel;
-            right = tl === "off" ? `${right} • thinking off` : `${right} • ${tl}`;
+            modelText = tl === "off" ? `${modelText} • thinking off` : `${modelText} • ${tl}`;
           }
-          if (m) {
-            const withProv = `(${m.provider}) ${right}`;
-            if (visibleWidth(left) + 2 + visibleWidth(withProv) <= width) {
-              right = withProv;
-            }
+          const withProvider = m ? `(${m.provider}) ${modelText}` : modelText;
+          let right = withProvider;
+          let left = parts.join(" ");
+          if (visibleWidth(left) + 2 + visibleWidth(right) > width) right = modelText;
+
+          const fits = () => visibleWidth(left) + 2 + visibleWidth(right) <= width;
+          if (!fits()) {
+            for (const index of cachePartIndexes) parts[index] = "";
+            left = parts.filter(Boolean).join(" ");
+          }
+          if (!fits() && costPartIndex >= 0) {
+            parts[costPartIndex] = "";
+            left = parts.filter(Boolean).join(" ");
           }
 
           const lw = visibleWidth(left);
           const rw = visibleWidth(right);
-
           let ln2: string;
           if (lw + 2 + rw <= width) {
             ln2 = left + " ".repeat(width - lw - rw) + right;
@@ -456,15 +465,30 @@ export default function (pi: ExtensionAPI) {
 
   // ── Events ─────────────────────────────────────────────────
   pi.on("session_start", async (_e, ctx) => {
+    latestCtx = ctx;
     tokenSrc = readTokenSource();
     thinkingLevel = pi.getThinkingLevel?.() || "off";
+    footerOn = false;
     toggleFooter(ctx);
     if (tokenSrc) refresh(ctx);
   });
 
-  pi.on("model_select", async (_e, ctx) => { toggleFooter(ctx); if (tokenSrc) refresh(ctx); });
+  pi.on("model_select", async (_e, ctx) => {
+    latestCtx = ctx;
+    if (isCodex(ctx)) {
+      // Let the previous usage extension unmount first when switching providers.
+      setTimeout(() => {
+        toggleFooter(ctx);
+        if (tokenSrc) refresh(ctx);
+      }, 0);
+    } else {
+      // Vacate the footer immediately so the target provider can take it over.
+      toggleFooter(ctx);
+      if (tokenSrc) refresh(ctx);
+    }
+  });
   pi.on("thinking_level_select", async (event: any) => { thinkingLevel = event.level || "off"; trigger(); });
-  pi.on("agent_end", async (_e, ctx) => { if (tokenSrc) refresh(ctx); });
+  pi.on("agent_end", async (_e, ctx) => { latestCtx = ctx; if (tokenSrc) refresh(ctx); });
 
   // ── /codex ───────────────────────────────────────────────
   pi.registerCommand("codex", {
