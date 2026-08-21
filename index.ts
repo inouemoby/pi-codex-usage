@@ -506,6 +506,11 @@ export default function (pi: ExtensionAPI) {
     }
   });
   pi.on("thinking_level_select", async (event: any) => { thinkingLevel = event.level || "off"; trigger(); });
+  pi.on("agent_start", async (_e, ctx) => {
+    latestCtx = ctx;
+    // Re-apply after any late model-catalog refresh.
+    forceLunaContextWindow(ctx);
+  });
   pi.on("agent_end", async (_e, ctx) => { latestCtx = ctx; if (tokenSrc) refresh(ctx); });
 
   // ── /codex ───────────────────────────────────────────────
