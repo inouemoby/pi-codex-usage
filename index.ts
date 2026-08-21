@@ -17,6 +17,10 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // Refresh the access token 1h before its real expiry (JWT `exp`).
 const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
+// pi's catalogue currently advertises GPT-5.6 Luna as 272K. Keep the
+// override local to this extension so compaction and context display use 512K.
+const LUNA_CONTEXT_WINDOW = 512_000;
+
 // ─── Types ───────────────────────────────────────────────────────
 interface RateWindow {
   used_percent: number;
@@ -327,6 +331,18 @@ export default function (pi: ExtensionAPI) {
     // openai-codex provider, or any openai/codex model using the ChatGPT subscription.
     return p.includes("codex") || (p.includes("openai") && !p.includes("realtime"));
   }
+
+  function forceLunaContextWindow(ctx: any) {
+    const candidates: any[] = [];
+    if (ctx.model) candidates.push(ctx.model);
+    try { candidates.push(...(ctx.modelRegistry?.getAll?.() ?? [])); } catch { /* unavailable during startup */ }
+    for (const model of candidates) {
+      if (model?.provider === "openai-codex" && model?.id === "gpt-5.6-luna") {
+        model.contextWindow = LUNA_CONTEXT_WINDOW;
+      }
+    }
+  }
+
   function trigger() {
     setTimeout(() => {
       try { _tui?.requestRender?.(); } catch { /* footer disposed */ }
@@ -466,6 +482,7 @@ export default function (pi: ExtensionAPI) {
   // ── Events ─────────────────────────────────────────────────
   pi.on("session_start", async (_e, ctx) => {
     latestCtx = ctx;
+    forceLunaContextWindow(ctx);
     tokenSrc = readTokenSource();
     thinkingLevel = pi.getThinkingLevel?.() || "off";
     footerOn = false;
@@ -475,6 +492,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("model_select", async (_e, ctx) => {
     latestCtx = ctx;
+    forceLunaContextWindow(ctx);
     if (isCodex(ctx)) {
       // Let the previous usage extension unmount first when switching providers.
       setTimeout(() => {
