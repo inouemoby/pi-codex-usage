@@ -1,7 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
 
@@ -563,52 +562,4 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── codex_usage tool ──────────────────────────────────────
-  pi.registerTool({
-    name: "codex_usage",
-    label: "Codex Usage",
-    description: "Get current OpenAI Codex usage.",
-    parameters: Type.Object({}),
-    async execute() {
-      try {
-        const d = await getUsage();
-        const result: any = {
-          plan: d.plan,
-          // NOTE: email intentionally omitted — tool results are sent to the
-          // active LLM provider, which may be a third party. Use `/codex` to
-          // see the account email locally.
-          fiveHour: d.fiveHourPercent >= 0 ? {
-            usedPercent: d.fiveHourPercent,
-            remainingPercent: +(100 - d.fiveHourPercent).toFixed(1),
-            resetsIn: humanDuration(d.fiveHourResetMs - Date.now()),
-          } : null,
-          weekly: d.weeklyPercent >= 0 ? {
-            usedPercent: d.weeklyPercent,
-            remainingPercent: +(100 - d.weeklyPercent).toFixed(1),
-            resetsIn: humanDuration(d.weeklyResetMs - Date.now()),
-          } : null,
-          credits: {
-            balance: d.creditsBalance,
-            hasCredits: d.hasCredits,
-            unlimited: d.unlimited,
-          },
-          limitReached: d.limitReached,
-        };
-        if (d.extraLimits.length) {
-          result.extraLimits = d.extraLimits.map((e) => ({
-            label: e.label,
-            usedPercent: e.used_percent,
-            resetsIn: humanDuration(e.reset_at * 1000 - Date.now()),
-          }));
-        }
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
-      } catch (err: any) {
-        return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
-      }
-    },
-  });
 }
