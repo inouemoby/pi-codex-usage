@@ -16,13 +16,40 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // Refresh the access token 1h before its real expiry (JWT `exp`).
 const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
+const CODEX_PROVIDER = "openai-codex";
+const OPENAI_PROVIDER = "openai";
+const GPT6_MODEL_ID = "gpt-6-astra";
+const GPT6_BASE_URL = "https://chatgpt.com/backend-api";
+
 // Keep these overrides local to this extension so compaction and context
-// display use the desired windows for the GPT-5.6 Codex variants.
+// display use the desired windows for the Codex variants.
 const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
   "gpt-5.6-luna": 1_000_000,
   "gpt-5.6-sol": 512_000,
   "gpt-5.6-terra": 512_000,
+  [GPT6_MODEL_ID]: 272_000,
 };
+
+// Official GPT-6 Astra card data. The 272K context cap is intentional for
+// this Codex integration, even though the public API card advertises a larger
+// window. The model is added to the runtime catalog, never to models.json.
+const GPT6_MODEL = {
+  id: GPT6_MODEL_ID,
+  name: "GPT-6 Astra",
+  api: "openai-codex-responses",
+  baseUrl: GPT6_BASE_URL,
+  reasoning: true,
+  thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+  input: ["text", "image"],
+  cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+  contextWindow: 272_000,
+  maxTokens: 128_000,
+  compat: {
+    supportsOpenAIGrammarTools: true,
+    supportsAdditionalTools: true,
+    supportsToolSearch: true,
+  },
+} as const;
 
 // ─── Types ───────────────────────────────────────────────────────
 interface RateWindow {
@@ -319,6 +346,7 @@ export default function (pi: ExtensionAPI) {
   let _tui: any = null;
   let latestCtx: any = null;
   let thinkingLevel = "off";
+  let gpt6AstraRegistered = false;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -335,7 +363,40 @@ export default function (pi: ExtensionAPI) {
     return p.includes("codex") || (p.includes("openai") && !p.includes("realtime"));
   }
 
-  function forceLunaContextWindow(ctx: any) {
+  /** Add the official GPT-6 Astra card to the in-memory Codex catalog. */
+  function registerGpt6Astra(ctx: any): boolean {
+    if (gpt6AstraRegistered) return true;
+    try {
+      const existing = (ctx.modelRegistry?.getAll?.() ?? [])
+        .filter((model: any) => model.provider === CODEX_PROVIDER && model.id !== GPT6_MODEL_ID)
+        .map((model: any) => ({
+          id: model.id,
+          name: model.name,
+          api: model.api,
+          baseUrl: model.baseUrl,
+          reasoning: model.reasoning,
+          thinkingLevelMap: model.thinkingLevelMap,
+          input: model.input,
+          cost: model.cost,
+          contextWindow: model.contextWindow,
+          maxTokens: model.maxTokens,
+          headers: model.headers,
+          compat: model.compat,
+        }));
+
+      // Registering models replaces the extension layer for this provider, so
+      // retain the current catalog (including models.json entries) first.
+      pi.registerProvider(CODEX_PROVIDER, {
+        models: [...existing, GPT6_MODEL],
+      } as any);
+      gpt6AstraRegistered = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function forceCodexContextWindows(ctx: any) {
     const candidates: any[] = [];
     if (ctx.model) candidates.push(ctx.model);
     try { candidates.push(...(ctx.modelRegistry?.getAll?.() ?? [])); } catch { /* unavailable during startup */ }
@@ -484,9 +545,23 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Events ─────────────────────────────────────────────────
+  // Flex is an OpenAI API service tier. The ChatGPT subscription/Codex
+  // endpoint rejects it, so never add it to openai-codex requests.
+  pi.on("before_provider_request", async (event: any, ctx: any) => {
+    if (ctx.model?.provider !== OPENAI_PROVIDER) {
+      return event.payload;
+    }
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return payload;
+    }
+    return { ...(payload as Record<string, unknown>), service_tier: "flex" };
+  });
+
   pi.on("session_start", async (_e, ctx) => {
     latestCtx = ctx;
-    forceLunaContextWindow(ctx);
+    registerGpt6Astra(ctx);
+    forceCodexContextWindows(ctx);
     tokenSrc = readTokenSource();
     thinkingLevel = pi.getThinkingLevel?.() || "off";
     footerOn = false;
@@ -496,7 +571,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("model_select", async (_e, ctx) => {
     latestCtx = ctx;
-    forceLunaContextWindow(ctx);
+    forceCodexContextWindows(ctx);
     if (isCodex(ctx)) {
       // Let the previous usage extension unmount first when switching providers.
       setTimeout(() => {
@@ -513,7 +588,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_start", async (_e, ctx) => {
     latestCtx = ctx;
     // Re-apply after any late model-catalog refresh.
-    forceLunaContextWindow(ctx);
+    forceCodexContextWindows(ctx);
   });
   pi.on("agent_end", async (_e, ctx) => { latestCtx = ctx; if (tokenSrc) refresh(ctx); });
 

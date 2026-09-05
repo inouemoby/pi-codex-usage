@@ -25,6 +25,24 @@ The extension automatically refreshes the ChatGPT OAuth access token before it e
 |---------|-------------|
 | `/codex` | Show detailed usage with progress bars (5h / weekly / credits) |
 
+## GPT-6 Astra
+
+The extension adds the official `openai-codex/gpt-6-astra` model card to the runtime catalog. The displayed card data is:
+
+- Name: GPT-6 Astra
+- Input: $10 / 1M tokens
+- Cached input: $1 / 1M tokens
+- Cache writes: $12.50 / 1M tokens
+- Output: $50 / 1M tokens
+- Context window in this integration: 272K
+- Max output: 128K
+
+It is available directly from the model picker. The catalog entry is not written to `models.json`.
+
+## Flex processing
+
+OpenAI API (`openai`) models default to `service_tier: "flex"`. The ChatGPT subscription/Codex endpoint (`openai-codex`) rejects this field, so Codex requests—including GPT-6 Astra through the subscription endpoint—do not send it.
+
 ## Footer Display
 
 When using a Codex / ChatGPT-backed model, the footer shows:
