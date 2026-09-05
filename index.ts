@@ -19,7 +19,6 @@ const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 const CODEX_PROVIDER = "openai-codex";
 const OPENAI_PROVIDER = "openai";
 const GPT6_MODEL_ID = "gpt-6-astra";
-const GPT6_BASE_URL = "https://chatgpt.com/backend-api";
 
 // Keep these overrides local to this extension so compaction and context
 // display use the desired windows for the Codex variants.
@@ -29,32 +28,6 @@ const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
   "gpt-5.6-terra": 512_000,
   [GPT6_MODEL_ID]: 512_000,
 };
-
-// Official GPT-6 Astra card data. The 512K context cap is intentional for
-// this Codex integration, even though the public API card advertises a larger
-// window. The model is added to the runtime catalog, never to models.json.
-const GPT6_MODEL = {
-  id: GPT6_MODEL_ID,
-  name: "GPT-6 Astra",
-  api: "openai-codex-responses",
-  baseUrl: GPT6_BASE_URL,
-  reasoning: true,
-  thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
-  input: ["text", "image"],
-  cost: {
-    input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5,
-    tiers: [
-      { inputTokensAbove: 272_000, input: 20, output: 75, cacheRead: 2, cacheWrite: 25 },
-    ],
-  },
-  contextWindow: 512_000,
-  maxTokens: 128_000,
-  compat: {
-    supportsOpenAIGrammarTools: true,
-    supportsAdditionalTools: true,
-    supportsToolSearch: true,
-  },
-} as const;
 
 // ─── Types ───────────────────────────────────────────────────────
 interface RateWindow {
@@ -351,7 +324,6 @@ export default function (pi: ExtensionAPI) {
   let _tui: any = null;
   let latestCtx: any = null;
   let thinkingLevel = "off";
-  let gpt6AstraRegistered = false;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -366,39 +338,6 @@ export default function (pi: ExtensionAPI) {
     const p = ctx.model?.provider?.toLowerCase() ?? "";
     // openai-codex provider, or any openai/codex model using the ChatGPT subscription.
     return p.includes("codex") || (p.includes("openai") && !p.includes("realtime"));
-  }
-
-  /** Add the official GPT-6 Astra card to the in-memory Codex catalog. */
-  function registerGpt6Astra(ctx: any): boolean {
-    if (gpt6AstraRegistered) return true;
-    try {
-      const existing = (ctx.modelRegistry?.getAll?.() ?? [])
-        .filter((model: any) => model.provider === CODEX_PROVIDER && model.id !== GPT6_MODEL_ID)
-        .map((model: any) => ({
-          id: model.id,
-          name: model.name,
-          api: model.api,
-          baseUrl: model.baseUrl,
-          reasoning: model.reasoning,
-          thinkingLevelMap: model.thinkingLevelMap,
-          input: model.input,
-          cost: model.cost,
-          contextWindow: model.contextWindow,
-          maxTokens: model.maxTokens,
-          headers: model.headers,
-          compat: model.compat,
-        }));
-
-      // Registering models replaces the extension layer for this provider, so
-      // retain the current catalog (including models.json entries) first.
-      pi.registerProvider(CODEX_PROVIDER, {
-        models: [...existing, GPT6_MODEL],
-      } as any);
-      gpt6AstraRegistered = true;
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   function forceCodexContextWindows(ctx: any) {
@@ -565,7 +504,6 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_e, ctx) => {
     latestCtx = ctx;
-    registerGpt6Astra(ctx);
     forceCodexContextWindows(ctx);
     tokenSrc = readTokenSource();
     thinkingLevel = pi.getThinkingLevel?.() || "off";
