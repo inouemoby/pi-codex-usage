@@ -27,10 +27,10 @@ const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
   "gpt-5.6-luna": 1_000_000,
   "gpt-5.6-sol": 512_000,
   "gpt-5.6-terra": 512_000,
-  [GPT6_MODEL_ID]: 272_000,
+  [GPT6_MODEL_ID]: 512_000,
 };
 
-// Official GPT-6 Astra card data. The 272K context cap is intentional for
+// Official GPT-6 Astra card data. The 512K context cap is intentional for
 // this Codex integration, even though the public API card advertises a larger
 // window. The model is added to the runtime catalog, never to models.json.
 const GPT6_MODEL = {
@@ -41,8 +41,13 @@ const GPT6_MODEL = {
   reasoning: true,
   thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
   input: ["text", "image"],
-  cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
-  contextWindow: 272_000,
+  cost: {
+    input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5,
+    tiers: [
+      { inputTokensAbove: 272_000, input: 20, output: 75, cacheRead: 2, cacheWrite: 25 },
+    ],
+  },
+  contextWindow: 512_000,
   maxTokens: 128_000,
   compat: {
     supportsOpenAIGrammarTools: true,

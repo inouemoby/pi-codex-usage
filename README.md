@@ -34,8 +34,10 @@ The extension adds the official `openai-codex/gpt-6-astra` model card to the run
 - Cached input: $1 / 1M tokens
 - Cache writes: $12.50 / 1M tokens
 - Output: $50 / 1M tokens
-- Context window in this integration: 272K
+- Context window in this integration: 512K
 - Max output: 128K
+
+Above 272K input tokens, the full request uses the official long-context rates: input $20, cached input $2, cache writes $25, output $75 per 1M tokens.
 
 It is available directly from the model picker. The catalog entry is not written to `models.json`.
 
