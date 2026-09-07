@@ -25,7 +25,7 @@ const GPT6_MODEL_ID = "gpt-6-astra";
 const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
   "gpt-5.6-luna": 1_000_000,
   "gpt-5.6-sol": 512_000,
-  "gpt-5.6-terra": 512_000,
+  "gpt-5.6-terra": 1_000_000,
   [GPT6_MODEL_ID]: 512_000,
 };
 
