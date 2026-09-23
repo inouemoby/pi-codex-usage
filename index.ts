@@ -323,6 +323,7 @@ export default function (pi: ExtensionAPI) {
   let tokenSrc: TokenSource | null = null;
   let usage: UsageData | null = null;
   let footerOn = false;
+  let footerGeneration = 0;
   let _tui: any = null;
   let latestCtx: any = null;
   let thinkingLevel = "off";
@@ -354,10 +355,12 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function requestRenderSafe(tui: any): void {
+    try { tui?.requestRender?.(); } catch { /* footer may already be disposed */ }
+  }
+
   function trigger() {
-    setTimeout(() => {
-      try { _tui?.requestRender?.(); } catch { /* footer disposed */ }
-    }, 0);
+    setTimeout(() => requestRenderSafe(_tui), 0);
   }
 
   // ── Refresh ─────────────────────────────────────────────────
@@ -371,9 +374,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Footer ──────────────────────────────────────────────────
-  function toggleFooter(ctx: any) {
+  function toggleFooter(ctx: any, force = false) {
     if (isCodex(ctx) && tokenSrc) {
-      if (!footerOn) {
+      if (!footerOn || force) {
         ctx.ui.setFooter(buildFooter(ctx));
         footerOn = true;
       }
@@ -387,11 +390,20 @@ export default function (pi: ExtensionAPI) {
   }
 
   function buildFooter(ctx: any) {
+    const generation = ++footerGeneration;
     return (tui: any, theme: any, fd: any) => {
       _tui = tui;
-      const unsub = fd.onBranchChange(() => tui.requestRender());
+      const unsub = fd.onBranchChange(() => {
+        if (generation === footerGeneration) requestRenderSafe(tui);
+      });
       return {
-        dispose: () => { unsub(); _tui = null; footerOn = false; },
+        dispose: () => {
+          try { unsub(); } catch { /* already disposed */ }
+          if (generation === footerGeneration) {
+            _tui = null;
+            footerOn = false;
+          }
+        },
         invalidate() {},
         render(width: number): string[] {
           const sm = ctx.sessionManager;
@@ -510,9 +522,11 @@ export default function (pi: ExtensionAPI) {
     tokenSrc = readTokenSource();
     thinkingLevel = pi.getThinkingLevel?.() || "off";
     footerOn = false;
-    toggleFooter(ctx);
+    toggleFooter(ctx, true);
     if (tokenSrc) refresh(ctx);
   });
+
+  pi.on("session_shutdown", async () => { latestCtx = null; });
 
   pi.on("model_select", async (_e, ctx) => {
     latestCtx = ctx;
@@ -520,8 +534,12 @@ export default function (pi: ExtensionAPI) {
     if (isCodex(ctx)) {
       // Let the previous usage extension unmount first when switching providers.
       setTimeout(() => {
-        toggleFooter(ctx);
-        if (tokenSrc) refresh(ctx);
+        const currentCtx = latestCtx;
+        if (!currentCtx || !isCodex(currentCtx)) return;
+        try {
+          toggleFooter(currentCtx, true);
+          if (tokenSrc) refresh(currentCtx);
+        } catch { /* session or footer was disposed */ }
       }, 0);
     } else {
       // Vacate the footer immediately so the target provider can take it over.
