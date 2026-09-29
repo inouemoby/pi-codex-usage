@@ -257,9 +257,14 @@ function bucketOf(w: RateWindow | null): "fiveHour" | "weekly" | null {
 
 async function fetchUsage(src: TokenSource): Promise<UsageData> {
   const fresh = await ensureFreshToken(src);
-  const resp = await fetch(USAGE_URL, {
-    headers: { Authorization: `Bearer ${fresh.access}`, Accept: "application/json" },
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${fresh.access}`,
+    Accept: "application/json",
+  };
+  // The WHAM endpoint can resolve the wrong/default account without this
+  // header, yielding a usage percentage that does not match the signed-in UI.
+  if (fresh.accountId) headers["ChatGPT-Account-Id"] = fresh.accountId;
+  const resp = await fetch(USAGE_URL, { headers });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
     throw new Error(`HTTP ${resp.status} ${text.slice(0, 160)}`);

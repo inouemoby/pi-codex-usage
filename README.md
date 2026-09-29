@@ -63,7 +63,7 @@ Check OpenAI Codex usage (5h window, weekly quota & credits)
 
 - Reads OAuth tokens from `~/.pi/agent/auth.json` (`openai-codex`) or `~/.codex/auth.json` (`tokens`).
 - Refreshes the access token via `POST https://auth.openai.com/oauth/token` (`grant_type=refresh_token`, client `app_EMoamEEZ73f0CkXaXp7hrann`) when the JWT `exp` is within 1 hour, then atomically writes the rotated tokens back.
-- Fetches usage from `GET https://chatgpt.com/backend-api/wham/usage` with the access token as a Bearer token.
+- Fetches usage from `GET https://chatgpt.com/backend-api/wham/usage` with the access token as a Bearer token and, when available, `ChatGPT-Account-Id` so the endpoint returns usage for the signed-in account.
 - Rate windows (`primary_window` / `secondary_window`) are classified into 5h vs weekly by their `limit_window_seconds` — OpenAI assigns these fields differently per plan, so classification by duration is more robust than by field name.
 
 The `wham/usage` endpoint is undocumented and may change without notice.
