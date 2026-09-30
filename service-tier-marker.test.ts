@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-import {
-  getFastTierMarker,
-  getReturnedFastTier,
-  hasActiveFastTierMarker,
-} from "./service-tier-marker.ts";
+import { getFastTierMarker } from "./service-tier-marker.ts";
 
 const model = { provider: "openai-codex", id: "gpt-6.1-sol" };
 const fastStatus = {
@@ -14,78 +9,19 @@ const fastStatus = {
   fast: true,
 };
 
-test("marks the exact active fast-tier model", () => {
-  assert.equal(hasActiveFastTierMarker(model, fastStatus), true);
+test("Fast shows only a bolt directly against the model name", () => {
+  assert.equal(getFastTierMarker(model, fastStatus), "⚡");
+  assert.equal(`${model.id}${getFastTierMarker(model, fastStatus)}`, "gpt-6.1-sol⚡");
 });
 
-test("distinguishes explicit non-fast results from missing tier metadata", () => {
-  assert.equal(
-    getReturnedFastTier({
-      type: "response.completed",
-      response: { service_tier: "priority" },
-    }),
-    true,
-  );
-  assert.equal(
-    getReturnedFastTier({
-      type: "response.done",
-      response: { service_tier: "fast" },
-    }),
-    true,
-  );
-  assert.equal(
-    getReturnedFastTier({
-      type: "response.completed",
-      response: { service_tier: "default" },
-    }),
-    false,
-  );
-  assert.equal(
-    getReturnedFastTier({ type: "response.completed", response: {} }),
-    null,
-  );
-  assert.equal(getReturnedFastTier({ type: "response.failed" }), false);
-  assert.equal(
-    getReturnedFastTier({ type: "response.output_text.delta" }),
-    undefined,
-  );
+test("turning Fast off removes the marker and turning it on restores it", () => {
+  assert.equal(getFastTierMarker(model, { ...fastStatus, fast: false }), "");
+  assert.equal(getFastTierMarker(model, fastStatus), "⚡");
 });
 
-test("shows ! only for an explicit non-fast result for this model", () => {
-  assert.equal(getFastTierMarker(model, fastStatus, undefined), "⚡");
-  assert.equal(
-    getFastTierMarker(model, fastStatus, { ...fastStatus, fast: true }),
-    "⚡",
-  );
-  assert.equal(
-    getFastTierMarker(model, fastStatus, { ...fastStatus, fast: false }),
-    "!⚡",
-  );
-  assert.equal(
-    getFastTierMarker(model, fastStatus, { ...fastStatus, fast: null }),
-    "⚡",
-  );
-  assert.equal(
-    getFastTierMarker(model, fastStatus, {
-      ...fastStatus,
-      provider: "openai",
-      fast: false,
-    }),
-    "⚡",
-  );
-});
-
-test("does not mark inactive or different models/providers", () => {
-  assert.equal(
-    hasActiveFastTierMarker(model, { ...fastStatus, fast: false }),
-    false,
-  );
-  assert.equal(
-    hasActiveFastTierMarker(model, { ...fastStatus, provider: "openai" }),
-    false,
-  );
-  assert.equal(
-    hasActiveFastTierMarker(model, { ...fastStatus, modelId: "gpt-6-sol" }),
-    false,
-  );
+test("missing state/model and mismatched provider/model show no marker", () => {
+  assert.equal(getFastTierMarker(model, undefined), "");
+  assert.equal(getFastTierMarker(undefined, fastStatus), "");
+  assert.equal(getFastTierMarker(model, { ...fastStatus, provider: "openai" }), "");
+  assert.equal(getFastTierMarker(model, { ...fastStatus, modelId: "gpt-6-luna" }), "");
 });

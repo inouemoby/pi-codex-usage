@@ -3,8 +3,6 @@ import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-codi
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   getFastTierMarker,
-  getReturnedFastTier,
-  type FastTierResponseStatus,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
@@ -328,7 +326,6 @@ export default function (pi: ExtensionAPI) {
   let latestCtx: any = null;
   let thinkingLevel = "off";
   let fastTierStatus: FastTierStatus | undefined;
-  let fastTierResponseStatus: FastTierResponseStatus | undefined;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -369,38 +366,11 @@ export default function (pi: ExtensionAPI) {
       modelId?: unknown;
       fast?: unknown;
     } | null;
-    const nextStatus =
+    fastTierStatus =
       state && typeof state.provider === "string" && typeof state.modelId === "string"
         ? { provider: state.provider, modelId: state.modelId, fast: state.fast === true }
         : undefined;
-    if (
-      fastTierStatus?.provider !== nextStatus?.provider ||
-      fastTierStatus?.modelId !== nextStatus?.modelId ||
-      fastTierStatus?.fast !== nextStatus?.fast
-    ) {
-      fastTierResponseStatus = undefined;
-    }
-    fastTierStatus = nextStatus;
     trigger();
-  });
-
-  pi.on("provider_stream_event", async (event) => {
-    if (
-      !fastTierStatus?.fast ||
-      event.provider !== fastTierStatus.provider ||
-      event.model !== fastTierStatus.modelId
-    ) {
-      return;
-    }
-    const returnedFast = getReturnedFastTier(event.data);
-    if (returnedFast !== undefined) {
-      fastTierResponseStatus = {
-        provider: fastTierStatus.provider,
-        modelId: fastTierStatus.modelId,
-        fast: returnedFast,
-      };
-      trigger();
-    }
   });
 
   // ── Refresh ─────────────────────────────────────────────────
@@ -506,11 +476,7 @@ export default function (pi: ExtensionAPI) {
           // the line is too wide; cache counters and then cost are removed next.
           const m = ctx.model;
           const modelId = m?.id || "no-model";
-          let modelText = `${modelId}${getFastTierMarker(
-            m,
-            fastTierStatus,
-            fastTierResponseStatus,
-          )}`;
+          let modelText = `${modelId}${getFastTierMarker(m, fastTierStatus)}`;
           if (m?.reasoning) {
             const tl = thinkingLevel;
             modelText = tl === "off" ? `${modelText} • thinking off` : `${modelText} • ${tl}`;
