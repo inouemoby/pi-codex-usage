@@ -1,6 +1,10 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  hasActiveFastTierMarker,
+  type FastTierStatus,
+} from "./service-tier-marker.ts";
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
 
@@ -332,6 +336,7 @@ export default function (pi: ExtensionAPI) {
   let _tui: any = null;
   let latestCtx: any = null;
   let thinkingLevel = "off";
+  let fastTierStatus: FastTierStatus | undefined;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -367,6 +372,19 @@ export default function (pi: ExtensionAPI) {
   function trigger() {
     setTimeout(() => requestRenderSafe(_tui), 0);
   }
+
+  pi.events.on("pi-service-tier:state", (payload: unknown) => {
+    const state = payload as {
+      provider?: unknown;
+      modelId?: unknown;
+      fast?: unknown;
+    } | null;
+    fastTierStatus =
+      state && typeof state.provider === "string" && typeof state.modelId === "string"
+        ? { provider: state.provider, modelId: state.modelId, fast: state.fast === true }
+        : undefined;
+    trigger();
+  });
 
   // ── Refresh ─────────────────────────────────────────────────
   async function refresh(ctx: any) {
@@ -470,7 +488,10 @@ export default function (pi: ExtensionAPI) {
           // Right side: model info. Provider is the first thing omitted when
           // the line is too wide; cache counters and then cost are removed next.
           const m = ctx.model;
-          let modelText = m?.id || "no-model";
+          const modelId = m?.id || "no-model";
+          let modelText = hasActiveFastTierMarker(m, fastTierStatus)
+            ? `${modelId} ⚡`
+            : modelId;
           if (m?.reasoning) {
             const tl = thinkingLevel;
             modelText = tl === "off" ? `${modelText} • thinking off` : `${modelText} • ${tl}`;
