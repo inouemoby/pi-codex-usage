@@ -4,6 +4,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   getFastTierMarker,
   getReturnedFastTier,
+  type FastTierResponseStatus,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
@@ -327,7 +328,7 @@ export default function (pi: ExtensionAPI) {
   let latestCtx: any = null;
   let thinkingLevel = "off";
   let fastTierStatus: FastTierStatus | undefined;
-  let fastTierResponseStatus: FastTierStatus | undefined;
+  let fastTierResponseStatus: FastTierResponseStatus | undefined;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(

@@ -16,7 +16,15 @@ export function hasActiveFastTierMarker(
   );
 }
 
-export function getReturnedFastTier(data: unknown): boolean | undefined {
+export interface FastTierResponseStatus {
+  provider: string;
+  modelId: string;
+  fast: boolean | null;
+}
+
+export function getReturnedFastTier(
+  data: unknown,
+): boolean | null | undefined {
   if (!isRecord(data) || typeof data.type !== "string") return undefined;
 
   if (data.type === "error" || data.type === "response.failed") return false;
@@ -29,20 +37,21 @@ export function getReturnedFastTier(data: unknown): boolean | undefined {
   }
 
   const response = isRecord(data.response) ? data.response : undefined;
-  return response?.service_tier === "priority" || response?.service_tier === "fast";
+  if (!response || typeof response.service_tier !== "string") return null;
+  return response.service_tier === "priority" || response.service_tier === "fast";
 }
 
 export function getFastTierMarker(
   model: { provider?: string; id?: string } | undefined,
   status: FastTierStatus | undefined,
-  responseStatus: FastTierStatus | undefined,
+  responseStatus: FastTierResponseStatus | undefined,
 ): string {
   if (!model || !hasActiveFastTierMarker(model, status)) return "";
 
   return responseStatus !== undefined &&
     responseStatus.provider === model.provider &&
     responseStatus.modelId === model.id &&
-    !responseStatus.fast
+    responseStatus.fast === false
     ? "!⚡"
     : "⚡";
 }

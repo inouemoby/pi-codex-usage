@@ -18,7 +18,7 @@ test("marks the exact active fast-tier model", () => {
   assert.equal(hasActiveFastTierMarker(model, fastStatus), true);
 });
 
-test("parses the returned tier from final provider stream events", () => {
+test("distinguishes explicit non-fast results from missing tier metadata", () => {
   assert.equal(
     getReturnedFastTier({
       type: "response.completed",
@@ -42,7 +42,7 @@ test("parses the returned tier from final provider stream events", () => {
   );
   assert.equal(
     getReturnedFastTier({ type: "response.completed", response: {} }),
-    false,
+    null,
   );
   assert.equal(getReturnedFastTier({ type: "response.failed" }), false);
   assert.equal(
@@ -51,7 +51,7 @@ test("parses the returned tier from final provider stream events", () => {
   );
 });
 
-test("shows ! only when the returned tier for this model is not fast", () => {
+test("shows ! only for an explicit non-fast result for this model", () => {
   assert.equal(getFastTierMarker(model, fastStatus, undefined), "⚡");
   assert.equal(
     getFastTierMarker(model, fastStatus, { ...fastStatus, fast: true }),
@@ -60,6 +60,10 @@ test("shows ! only when the returned tier for this model is not fast", () => {
   assert.equal(
     getFastTierMarker(model, fastStatus, { ...fastStatus, fast: false }),
     "!⚡",
+  );
+  assert.equal(
+    getFastTierMarker(model, fastStatus, { ...fastStatus, fast: null }),
+    "⚡",
   );
   assert.equal(
     getFastTierMarker(model, fastStatus, {

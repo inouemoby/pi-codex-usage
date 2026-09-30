@@ -49,10 +49,10 @@ When using a Codex / ChatGPT-backed model, the footer shows:
 - `5h:6%` — 5-hour rolling rate-limit window. `!` above expected pace, `!!` exceeds 1.5× expected pace
 - `wk:1%` — weekly quota (resets every 7 days), same pacing flags
 - `⚡` appears immediately after the model name when fast mode is active.
-- `!⚡` means fast mode is active but the completed provider response did not
-  report `service_tier: "priority"` or `"fast"`. It reflects response metadata;
-  it is not definitive proof that the backend failed to use fast mode. Both
-  markers are display-only.
+- `!⚡` means the completed provider response explicitly reported a non-fast
+  service tier. Missing tier metadata is treated as unknown, not as a failure.
+  The marker reflects response metadata; it is not definitive proof that the
+  backend failed to use fast mode. Both markers are display-only.
 
 ## Quota Details
 
