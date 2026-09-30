@@ -26,6 +26,7 @@ test("explicit model rules take precedence over the automatic default", () => {
   assert.deepEqual(CODEX_GPT_CONTEXT_OVERRIDES, {
     "gpt-5.6-luna": 1_000_000,
     "gpt-5.6-terra": 1_000_000,
+    "gpt-6-luna": 1_000_000,
   });
   assert.equal(
     getCodexGptContextWindow(

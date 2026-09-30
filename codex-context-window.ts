@@ -4,6 +4,7 @@ export const CODEX_GPT_CONTEXT_WINDOW = 512_000;
 export const CODEX_GPT_CONTEXT_OVERRIDES: Readonly<Record<string, number>> = {
   "gpt-5.6-luna": 1_000_000,
   "gpt-5.6-terra": 1_000_000,
+  "gpt-6-luna": 1_000_000,
 };
 
 export function getCodexGptContextWindow(

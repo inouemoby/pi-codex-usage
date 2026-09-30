@@ -30,9 +30,9 @@ The extension automatically refreshes the ChatGPT OAuth access token before it e
 The extension does not add or replace model cards. On `openai-codex`, numeric
 GPT 5.6-and-later model IDs default to a 512K context window; older GPT versions,
 non-GPT IDs, and other providers are unchanged. Exact model rules take precedence
-over this default and are kept in `CODEX_GPT_CONTEXT_OVERRIDES`; GPT-5.6 Luna and
-Terra currently have explicit 1M overrides. Add a model there when it needs a
-different context window.
+over this default and are kept in `CODEX_GPT_CONTEXT_OVERRIDES`; GPT-5.6 Luna,
+GPT-5.6 Terra, and GPT-6 Luna currently have explicit 1M overrides. Add a model
+there when it needs a different context window.
 
 ## Flex processing
 
