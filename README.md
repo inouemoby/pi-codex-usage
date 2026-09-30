@@ -43,13 +43,15 @@ OpenAI API (`openai`) models default to `service_tier: "flex"`. The ChatGPT subs
 When using a Codex / ChatGPT-backed model, the footer shows:
 
 ```
-↑3.2k ↓1.1k 12.5%/256k (auto) 5h:6% wk:1%    (openai-codex) gpt-5-codex ⚡ • medium
+↑3.2k ↓1.1k 12.5%/256k (auto) 5h:6% wk:1%    (openai-codex) gpt-5-codex⚡ • medium
 ```
 
 - `5h:6%` — 5-hour rolling rate-limit window. `!` above expected pace, `!!` exceeds 1.5× expected pace
 - `wk:1%` — weekly quota (resets every 7 days), same pacing flags
-- A trailing `⚡` appears on the model name when `pi-service-tier` has fast mode
-  active for that exact provider/model. The marker is display-only.
+- `⚡` appears immediately after the model name when fast mode is active.
+- `!⚡` means fast mode is active but Pi did not confirm `service_tier: "priority"`
+  in the outgoing provider payload. This checks the request payload, not whether
+  the remote service ultimately honored the tier. Both markers are display-only.
 
 ## Quota Details
 

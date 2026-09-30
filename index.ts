@@ -2,7 +2,8 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
-  hasActiveFastTierMarker,
+  getFastTierMarker,
+  type FastTierRequestStatus,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
@@ -326,6 +327,7 @@ export default function (pi: ExtensionAPI) {
   let latestCtx: any = null;
   let thinkingLevel = "off";
   let fastTierStatus: FastTierStatus | undefined;
+  let fastTierRequestStatus: FastTierRequestStatus | undefined;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -366,11 +368,67 @@ export default function (pi: ExtensionAPI) {
       modelId?: unknown;
       fast?: unknown;
     } | null;
-    fastTierStatus =
+    const nextStatus =
       state && typeof state.provider === "string" && typeof state.modelId === "string"
         ? { provider: state.provider, modelId: state.modelId, fast: state.fast === true }
         : undefined;
+    if (
+      fastTierStatus?.provider !== nextStatus?.provider ||
+      fastTierStatus?.modelId !== nextStatus?.modelId ||
+      fastTierStatus?.fast !== nextStatus?.fast
+    ) {
+      fastTierRequestStatus = undefined;
+    }
+    fastTierStatus = nextStatus;
     trigger();
+  });
+
+  pi.events.on("pi-service-tier:request", (payload: unknown) => {
+    const request = payload as {
+      provider?: unknown;
+      modelId?: unknown;
+      fast?: unknown;
+      applied?: unknown;
+    } | null;
+    fastTierRequestStatus =
+      request &&
+      typeof request.provider === "string" &&
+      typeof request.modelId === "string" &&
+      typeof request.fast === "boolean" &&
+      typeof request.applied === "boolean"
+        ? {
+            provider: request.provider,
+            modelId: request.modelId,
+            fast: request.fast,
+            applied: request.applied,
+          }
+        : undefined;
+    trigger();
+  });
+
+  pi.on("provider_stream_event", async (event) => {
+    if (
+      !fastTierStatus?.fast ||
+      event.provider !== fastTierStatus.provider ||
+      event.model !== fastTierStatus.modelId
+    ) {
+      return;
+    }
+    const requestStatus = fastTierRequestStatus;
+    const requestWasApplied =
+      requestStatus !== undefined &&
+      requestStatus.provider === fastTierStatus.provider &&
+      requestStatus.modelId === fastTierStatus.modelId &&
+      requestStatus.fast &&
+      requestStatus.applied;
+    if (!requestWasApplied) {
+      fastTierRequestStatus = {
+        ...fastTierStatus,
+        fast: true,
+        applied: false,
+      };
+      trigger();
+    }
   });
 
   // ── Refresh ─────────────────────────────────────────────────
@@ -476,9 +534,11 @@ export default function (pi: ExtensionAPI) {
           // the line is too wide; cache counters and then cost are removed next.
           const m = ctx.model;
           const modelId = m?.id || "no-model";
-          let modelText = hasActiveFastTierMarker(m, fastTierStatus)
-            ? `${modelId} ⚡`
-            : modelId;
+          let modelText = `${modelId}${getFastTierMarker(
+            m,
+            fastTierStatus,
+            fastTierRequestStatus,
+          )}`;
           if (m?.reasoning) {
             const tl = thinkingLevel;
             modelText = tl === "off" ? `${modelText} • thinking off` : `${modelText} • ${tl}`;
