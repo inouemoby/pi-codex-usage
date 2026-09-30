@@ -3,7 +3,7 @@ import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-codi
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   getFastTierMarker,
-  type FastTierRequestStatus,
+  getReturnedFastTier,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
@@ -327,7 +327,7 @@ export default function (pi: ExtensionAPI) {
   let latestCtx: any = null;
   let thinkingLevel = "off";
   let fastTierStatus: FastTierStatus | undefined;
-  let fastTierRequestStatus: FastTierRequestStatus | undefined;
+  let fastTierResponseStatus: FastTierStatus | undefined;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -377,32 +377,9 @@ export default function (pi: ExtensionAPI) {
       fastTierStatus?.modelId !== nextStatus?.modelId ||
       fastTierStatus?.fast !== nextStatus?.fast
     ) {
-      fastTierRequestStatus = undefined;
+      fastTierResponseStatus = undefined;
     }
     fastTierStatus = nextStatus;
-    trigger();
-  });
-
-  pi.events.on("pi-service-tier:request", (payload: unknown) => {
-    const request = payload as {
-      provider?: unknown;
-      modelId?: unknown;
-      fast?: unknown;
-      applied?: unknown;
-    } | null;
-    fastTierRequestStatus =
-      request &&
-      typeof request.provider === "string" &&
-      typeof request.modelId === "string" &&
-      typeof request.fast === "boolean" &&
-      typeof request.applied === "boolean"
-        ? {
-            provider: request.provider,
-            modelId: request.modelId,
-            fast: request.fast,
-            applied: request.applied,
-          }
-        : undefined;
     trigger();
   });
 
@@ -414,18 +391,12 @@ export default function (pi: ExtensionAPI) {
     ) {
       return;
     }
-    const requestStatus = fastTierRequestStatus;
-    const requestWasApplied =
-      requestStatus !== undefined &&
-      requestStatus.provider === fastTierStatus.provider &&
-      requestStatus.modelId === fastTierStatus.modelId &&
-      requestStatus.fast &&
-      requestStatus.applied;
-    if (!requestWasApplied) {
-      fastTierRequestStatus = {
-        ...fastTierStatus,
-        fast: true,
-        applied: false,
+    const returnedFast = getReturnedFastTier(event.data);
+    if (returnedFast !== undefined) {
+      fastTierResponseStatus = {
+        provider: fastTierStatus.provider,
+        modelId: fastTierStatus.modelId,
+        fast: returnedFast,
       };
       trigger();
     }
@@ -537,7 +508,7 @@ export default function (pi: ExtensionAPI) {
           let modelText = `${modelId}${getFastTierMarker(
             m,
             fastTierStatus,
-            fastTierRequestStatus,
+            fastTierResponseStatus,
           )}`;
           if (m?.reasoning) {
             const tl = thinkingLevel;
