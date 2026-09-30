@@ -25,9 +25,14 @@ The extension automatically refreshes the ChatGPT OAuth access token before it e
 |---------|-------------|
 | `/codex` | Show detailed usage with progress bars (5h / weekly / credits) |
 
-## GPT-6 Codex context windows
+## GPT Codex context windows
 
-The extension does not add or replace model cards. When Pi provides these models, it overrides their Codex context windows locally: GPT-6 Astra, Sol, 6.1 Sol, and Luna to 512K. Model availability and pricing come from Pi's built-in catalog.
+The extension does not add or replace model cards. For every model served by the
+`openai-codex` provider whose ID starts with `gpt-`, it overrides the context
+window to 512K. This rule also applies automatically to future GPT-series models,
+without adding each model to a list. Non-GPT model IDs and other providers are
+left unchanged. This also changes GPT-5.6 Luna and Terra from their catalog
+context windows to 512K.
 
 ## Flex processing
 

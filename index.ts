@@ -5,6 +5,7 @@ import {
   hasActiveFastTierMarker,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
+import { getCodexGptContextWindow } from "./codex-context-window.ts";
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
 
@@ -22,19 +23,6 @@ const REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
 const CODEX_PROVIDER = "openai-codex";
 const OPENAI_PROVIDER = "openai";
-const GPT6_MODEL_ID = "gpt-6-astra";
-
-// Keep these overrides local to this extension so compaction and context
-// display use the desired windows for the Codex variants.
-const CODEX_CONTEXT_OVERRIDES: Record<string, number> = {
-  "gpt-5.6-luna": 1_000_000,
-  "gpt-5.6-sol": 512_000,
-  "gpt-5.6-terra": 1_000_000,
-  [GPT6_MODEL_ID]: 512_000,
-  "gpt-6-sol": 512_000,
-  "gpt-6.1-sol": 512_000,
-  "gpt-6-luna": 512_000,
-};
 
 // ─── Types ───────────────────────────────────────────────────────
 interface RateWindow {
@@ -359,10 +347,8 @@ export default function (pi: ExtensionAPI) {
     if (ctx.model) candidates.push(ctx.model);
     try { candidates.push(...(ctx.modelRegistry?.getAll?.() ?? [])); } catch { /* unavailable during startup */ }
     for (const model of candidates) {
-      if (model?.provider === "openai-codex") {
-        const contextWindow = CODEX_CONTEXT_OVERRIDES[model.id];
-        if (contextWindow !== undefined) model.contextWindow = contextWindow;
-      }
+      const contextWindow = getCodexGptContextWindow(model);
+      if (contextWindow !== undefined) model.contextWindow = contextWindow;
     }
   }
 
