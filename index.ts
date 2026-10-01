@@ -5,6 +5,16 @@ import {
   getFastTierMarker,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
+import {
+  completeOutputTiming,
+  createOutputMetricsTicker,
+  createOutputTiming,
+  formatRecentOutput,
+  liveOutputTiming,
+  observeOutputEvent,
+  type OutputTiming,
+  type RecentOutputMetrics,
+} from "./output-metrics.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
@@ -326,6 +336,10 @@ export default function (pi: ExtensionAPI) {
   let latestCtx: any = null;
   let thinkingLevel = "off";
   let fastTierStatus: FastTierStatus | undefined;
+  let outputTiming: OutputTiming | null = null;
+  let pendingToolWaitStartedAt: number | null = null;
+  const outputMetricsTicker = createOutputMetricsTicker();
+  let recentOutputMetrics: RecentOutputMetrics | null = null;
 
   async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
@@ -358,6 +372,33 @@ export default function (pi: ExtensionAPI) {
 
   function trigger() {
     setTimeout(() => requestRenderSafe(_tui), 0);
+  }
+
+  function stopOutputMetricsInterval(): void {
+    outputMetricsTicker.stop();
+  }
+
+  function refreshLiveOutputMetrics(): void {
+    if (!outputTiming || outputTiming.firstTokenAt === undefined) {
+      stopOutputMetricsInterval();
+      return;
+    }
+    recentOutputMetrics = liveOutputTiming(outputTiming, performance.now());
+    trigger();
+  }
+
+  function startOutputMetricsInterval(): void {
+    outputMetricsTicker.start(refreshLiveOutputMetrics);
+  }
+
+  function finishOutputTiming(message: any): void {
+    if (!outputTiming) return;
+    const timing = outputTiming;
+    outputTiming = null;
+    stopOutputMetricsInterval();
+    const metrics = completeOutputTiming(timing, performance.now(), message?.usage?.output);
+    if (metrics) recentOutputMetrics = metrics;
+    trigger();
   }
 
   pi.events.on("pi-service-tier:state", (payload: unknown) => {
@@ -440,9 +481,10 @@ export default function (pi: ExtensionAPI) {
           }
           const parts: string[] = [];
           const cachePartIndexes: number[] = [];
+          const tokenPartIndexes: number[] = [];
           let costPartIndex = -1;
-          if (ti) parts.push(`↑${formatTokens(ti)}`);
-          if (to) parts.push(`↓${formatTokens(to)}`);
+          if (ti) { tokenPartIndexes.push(parts.length); parts.push(`↑${formatTokens(ti)}`); }
+          if (to) { tokenPartIndexes.push(parts.length); parts.push(`↓${formatTokens(to)}`); }
           if (tr) { cachePartIndexes.push(parts.length); parts.push(`R${formatTokens(tr)}`); }
           if (tw) { cachePartIndexes.push(parts.length); parts.push(`W${formatTokens(tw)}`); }
           if (tc) { costPartIndex = parts.length; parts.push(`$${tc.toFixed(3)}`); }
@@ -472,8 +514,10 @@ export default function (pi: ExtensionAPI) {
               parts.push(`${flag}wk:${usage.weeklyPercent}%`);
             }
           }
-          // Right side: model info. Provider is the first thing omitted when
-          // the line is too wide; cache counters and then cost are removed next.
+          // Place response timing immediately after weekly usage.
+          if (recentOutputMetrics) parts.push(formatRecentOutput(recentOutputMetrics));
+          // Right side: model info. Provider is omitted first when the line is
+          // too wide; cache counters, cost, then cumulative tokens follow.
           const m = ctx.model;
           const modelId = m?.id || "no-model";
           let modelText = `${modelId}${getFastTierMarker(m, fastTierStatus)}`;
@@ -493,6 +537,11 @@ export default function (pi: ExtensionAPI) {
           }
           if (!fits() && costPartIndex >= 0) {
             parts[costPartIndex] = "";
+            left = parts.filter(Boolean).join(" ");
+          }
+          // Cumulative token totals are the final optional stats to drop.
+          if (!fits() && tokenPartIndexes.length > 0) {
+            for (const index of tokenPartIndexes) parts[index] = "";
             left = parts.filter(Boolean).join(" ");
           }
 
@@ -517,6 +566,12 @@ export default function (pi: ExtensionAPI) {
   // Flex is an OpenAI API service tier. The ChatGPT subscription/Codex
   // endpoint rejects it, so never add it to openai-codex requests.
   pi.on("before_provider_request", async (event: any, ctx: any) => {
+    stopOutputMetricsInterval();
+    const requestStartedAt = performance.now();
+    outputTiming = isCodex(ctx)
+      ? createOutputTiming(pendingToolWaitStartedAt ?? requestStartedAt)
+      : null;
+    pendingToolWaitStartedAt = null;
     if (ctx.model?.provider !== OPENAI_PROVIDER) {
       return event.payload;
     }
@@ -525,6 +580,29 @@ export default function (pi: ExtensionAPI) {
       return payload;
     }
     return { ...(payload as Record<string, unknown>), service_tier: "flex" };
+  });
+
+  // Prefer the first reasoning delta (hidden from the user); fall back to the
+  // first visible text or tool-call payload when reasoning is unavailable.
+  pi.on("message_update", async (event: any) => {
+    if (!outputTiming || event.message?.role !== "assistant") return;
+    const now = performance.now();
+    const firstTokenStarted = observeOutputEvent(outputTiming, event.assistantMessageEvent, event.message, now);
+    if (firstTokenStarted) {
+      recentOutputMetrics = liveOutputTiming(outputTiming, now);
+      startOutputMetricsInterval();
+      trigger();
+    }
+  });
+
+  pi.on("message_end", async (event: any) => {
+    if (event.message?.role === "assistant") finishOutputTiming(event.message);
+  });
+
+  // A tool's server/processing time belongs to the next response's TTFT, not
+  // to the just-finished assistant message's output rate.
+  pi.on("tool_execution_start", async () => {
+    if (pendingToolWaitStartedAt === null) pendingToolWaitStartedAt = performance.now();
   });
 
   pi.on("session_start", async (_e, ctx) => {
@@ -537,7 +615,12 @@ export default function (pi: ExtensionAPI) {
     if (tokenSrc) refresh(ctx);
   });
 
-  pi.on("session_shutdown", async () => { latestCtx = null; });
+  pi.on("session_shutdown", async () => {
+    stopOutputMetricsInterval();
+    outputTiming = null;
+    pendingToolWaitStartedAt = null;
+    latestCtx = null;
+  });
 
   pi.on("model_select", async (_e, ctx) => {
     latestCtx = ctx;
@@ -554,6 +637,9 @@ export default function (pi: ExtensionAPI) {
       }, 0);
     } else {
       // Vacate the footer immediately so the target provider can take it over.
+      stopOutputMetricsInterval();
+      outputTiming = null;
+      pendingToolWaitStartedAt = null;
       toggleFooter(ctx);
       if (tokenSrc) refresh(ctx);
     }
@@ -564,7 +650,15 @@ export default function (pi: ExtensionAPI) {
     // Re-apply after any late model-catalog refresh.
     forceCodexContextWindows(ctx);
   });
-  pi.on("agent_end", async (_e, ctx) => { latestCtx = ctx; if (tokenSrc) refresh(ctx); });
+  pi.on("agent_end", async (event: any, ctx) => {
+    latestCtx = ctx;
+    if (outputTiming) {
+      const lastAssistant = [...(event.messages ?? [])].reverse().find((message: any) => message.role === "assistant");
+      finishOutputTiming(lastAssistant);
+    }
+    pendingToolWaitStartedAt = null;
+    if (tokenSrc) refresh(ctx);
+  });
 
   // ── /codex ───────────────────────────────────────────────
   pi.registerCommand("codex", {

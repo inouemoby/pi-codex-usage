@@ -43,11 +43,13 @@ OpenAI API (`openai`) models default to `service_tier: "flex"`. The ChatGPT subs
 When using a Codex / ChatGPT-backed model, the footer shows:
 
 ```
-↑3.2k ↓1.1k 12.5%/256k (auto) 5h:6% wk:1%    (openai-codex) gpt-5-codex⚡ • medium
+↑3.2k ↓1.1k 12.5%/256k (auto) 5h:6% wk:1% 0.42s 57t/s    (openai-codex) gpt-5-codex⚡ • medium
 ```
 
 - `5h:6%` — 5-hour rolling rate-limit window. `!` above expected pace, `!!` exceeds 1.5× expected pace
 - `wk:1%` — weekly quota (resets every 7 days), same pacing flags
+- `0.42s 57t/s` — first value is the most recent response's first-token latency; `t/s` is output speed. The latency uses the first hidden reasoning event when available, otherwise the first visible text/tool-call event. Live speed refreshes every second and is marked `~` because the provider reports exact token usage only at response end. The final rate then replaces the estimate. Speed excludes the first-token delay; tool execution/server wait is carried into the next response's first-token delay, not the preceding response's speed.
+- When space is tight, cumulative input/output token totals are omitted after cache and cost counters.
 - `⚡` appears immediately after the model name when fast mode is enabled for
   that provider/model. It reflects the setting only; returned service-tier fields
   are not used to add warning markers or claim which processing tier was used.
