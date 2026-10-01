@@ -7,10 +7,10 @@ import {
 } from "./service-tier-marker.ts";
 import {
   completeOutputTiming,
-  createOutputMetricsTicker,
   createOutputTiming,
+  firstTokenMetrics,
   formatRecentOutput,
-  liveOutputTiming,
+  retainPreviousTokenRate,
   observeOutputEvent,
   type OutputTiming,
   type RecentOutputMetrics,
@@ -338,7 +338,6 @@ export default function (pi: ExtensionAPI) {
   let fastTierStatus: FastTierStatus | undefined;
   let outputTiming: OutputTiming | null = null;
   let pendingToolWaitStartedAt: number | null = null;
-  const outputMetricsTicker = createOutputMetricsTicker();
   let recentOutputMetrics: RecentOutputMetrics | null = null;
 
   async function getUsage(): Promise<UsageData> {
@@ -374,30 +373,12 @@ export default function (pi: ExtensionAPI) {
     setTimeout(() => requestRenderSafe(_tui), 0);
   }
 
-  function stopOutputMetricsInterval(): void {
-    outputMetricsTicker.stop();
-  }
-
-  function refreshLiveOutputMetrics(): void {
-    if (!outputTiming || outputTiming.firstTokenAt === undefined) {
-      stopOutputMetricsInterval();
-      return;
-    }
-    recentOutputMetrics = liveOutputTiming(outputTiming, performance.now());
-    trigger();
-  }
-
-  function startOutputMetricsInterval(): void {
-    outputMetricsTicker.start(refreshLiveOutputMetrics);
-  }
-
   function finishOutputTiming(message: any): void {
     if (!outputTiming) return;
     const timing = outputTiming;
     outputTiming = null;
-    stopOutputMetricsInterval();
-    const metrics = completeOutputTiming(timing, performance.now(), message?.usage?.output);
-    if (metrics) recentOutputMetrics = metrics;
+    const metrics = completeOutputTiming(timing, message?.usage?.output);
+    if (metrics) recentOutputMetrics = retainPreviousTokenRate(metrics, recentOutputMetrics);
     trigger();
   }
 
@@ -566,7 +547,6 @@ export default function (pi: ExtensionAPI) {
   // Flex is an OpenAI API service tier. The ChatGPT subscription/Codex
   // endpoint rejects it, so never add it to openai-codex requests.
   pi.on("before_provider_request", async (event: any, ctx: any) => {
-    stopOutputMetricsInterval();
     const requestStartedAt = performance.now();
     outputTiming = isCodex(ctx)
       ? createOutputTiming(pendingToolWaitStartedAt ?? requestStartedAt)
@@ -589,8 +569,8 @@ export default function (pi: ExtensionAPI) {
     const now = performance.now();
     const firstTokenStarted = observeOutputEvent(outputTiming, event.assistantMessageEvent, event.message, now);
     if (firstTokenStarted) {
-      recentOutputMetrics = liveOutputTiming(outputTiming, now);
-      startOutputMetricsInterval();
+      const metrics = firstTokenMetrics(outputTiming);
+      if (metrics) recentOutputMetrics = retainPreviousTokenRate(metrics, recentOutputMetrics);
       trigger();
     }
   });
@@ -616,7 +596,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    stopOutputMetricsInterval();
     outputTiming = null;
     pendingToolWaitStartedAt = null;
     latestCtx = null;
@@ -637,7 +616,6 @@ export default function (pi: ExtensionAPI) {
       }, 0);
     } else {
       // Vacate the footer immediately so the target provider can take it over.
-      stopOutputMetricsInterval();
       outputTiming = null;
       pendingToolWaitStartedAt = null;
       toggleFooter(ctx);

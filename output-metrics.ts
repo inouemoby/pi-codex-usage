@@ -3,8 +3,7 @@ import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi
 export interface OutputTiming {
   requestStartedAt: number;
   firstTokenAt?: number;
-  asciiCharacters: number;
-  otherCharacters: number;
+  lastOutputAt?: number;
   streamedContentIndexes: Set<number>;
   fullyRecordedContentIndexes: Set<number>;
 }
@@ -12,50 +11,17 @@ export interface OutputTiming {
 export interface RecentOutputMetrics {
   ttftMs: number;
   tokensPerSecond?: number;
-  estimated?: boolean;
-}
-
-export function createOutputMetricsTicker(
-  schedule: typeof setInterval = setInterval,
-  cancel: typeof clearInterval = clearInterval,
-): { start(callback: () => void): void; stop(): void } {
-  let handle: ReturnType<typeof setInterval> | null = null;
-  return {
-    start(callback) {
-      if (handle === null) handle = schedule(callback, 1000);
-    },
-    stop() {
-      if (handle !== null) {
-        cancel(handle);
-        handle = null;
-      }
-    },
-  };
 }
 
 export function createOutputTiming(requestStartedAt: number): OutputTiming {
   return {
     requestStartedAt,
-    asciiCharacters: 0,
-    otherCharacters: 0,
     streamedContentIndexes: new Set(),
     fullyRecordedContentIndexes: new Set(),
   };
 }
 
-function addEstimatedText(timing: OutputTiming, text: string): void {
-  for (const character of text) {
-    if (character.codePointAt(0)! <= 0x7f) timing.asciiCharacters++;
-    else timing.otherCharacters++;
-  }
-}
-
-/** Approximate live token count; final count comes from provider-reported usage. */
-export function estimateStreamingOutputTokens(timing: OutputTiming): number {
-  return Math.ceil(timing.asciiCharacters / 4) + timing.otherCharacters;
-}
-
-/** Observe reasoning first, then visible text/tool-call output as a fallback. */
+/** Observe the first reasoning event, then visible text/tool-call output as fallback. */
 export function observeOutputEvent(
   timing: OutputTiming,
   event: AssistantMessageEvent,
@@ -63,15 +29,16 @@ export function observeOutputEvent(
   now: number,
 ): boolean {
   let firstTokenIsAvailable = false;
+  let outputWasObserved = false;
 
   switch (event.type) {
     case "thinking_delta":
     case "text_delta":
     case "toolcall_delta":
       if (event.delta.length > 0) {
-        addEstimatedText(timing, event.delta);
         timing.streamedContentIndexes.add(event.contentIndex);
         firstTokenIsAvailable = true;
+        outputWasObserved = true;
       }
       break;
     case "text_end":
@@ -81,30 +48,30 @@ export function observeOutputEvent(
           !timing.streamedContentIndexes.has(event.contentIndex) &&
           !timing.fullyRecordedContentIndexes.has(event.contentIndex)
         ) {
-          addEstimatedText(timing, event.content);
           timing.fullyRecordedContentIndexes.add(event.contentIndex);
+          outputWasObserved = true;
         }
-        // A late reasoning summary is not a reliable TTFT; text_end is a visible fallback.
+        // A late reasoning summary is not reliable TTFT; text_end is the visible fallback.
         firstTokenIsAvailable = event.type === "text_end";
       }
       break;
     case "thinking_start": {
-      // Redacted thinking can arrive complete here, without any deltas.
+      // Redacted thinking may be delivered complete at block start without deltas.
       const block = message.content[event.contentIndex];
       if (block?.type === "thinking" && block.thinking.length > 0) {
-        addEstimatedText(timing, block.thinking);
         timing.fullyRecordedContentIndexes.add(event.contentIndex);
         firstTokenIsAvailable = true;
+        outputWasObserved = true;
       }
       break;
     }
     case "toolcall_start":
-      // The first function-call event is the earliest observable tool output.
-      timing.otherCharacters++;
       firstTokenIsAvailable = true;
+      outputWasObserved = true;
       break;
   }
 
+  if (outputWasObserved) timing.lastOutputAt = now;
   if (firstTokenIsAvailable && timing.firstTokenAt === undefined) {
     timing.firstTokenAt = now;
     return true;
@@ -112,37 +79,34 @@ export function observeOutputEvent(
   return false;
 }
 
-export function completeOutputTiming(
-  timing: OutputTiming,
-  endedAt: number,
-  outputTokens?: number,
-): RecentOutputMetrics | null {
+export function firstTokenMetrics(timing: OutputTiming): RecentOutputMetrics | null {
   if (timing.firstTokenAt === undefined) return null;
-  const generationMs = endedAt - timing.firstTokenAt;
-  if (typeof outputTokens === "number" && Number.isFinite(outputTokens) && outputTokens > 0 && generationMs > 0) {
-    return {
-      ttftMs: Math.max(0, timing.firstTokenAt - timing.requestStartedAt),
-      tokensPerSecond: outputTokens * 1000 / generationMs,
-    };
-  }
-  const estimatedTokens = estimateStreamingOutputTokens(timing);
+  return { ttftMs: Math.max(0, timing.firstTokenAt - timing.requestStartedAt) };
+}
+
+export function retainPreviousTokenRate(
+  metrics: RecentOutputMetrics,
+  previous: RecentOutputMetrics | null,
+): RecentOutputMetrics {
   return {
-    ttftMs: Math.max(0, timing.firstTokenAt - timing.requestStartedAt),
-    tokensPerSecond:
-      estimatedTokens > 0 && generationMs > 0 ? estimatedTokens * 1000 / generationMs : undefined,
-    estimated: true,
+    ...metrics,
+    tokensPerSecond: metrics.tokensPerSecond ?? previous?.tokensPerSecond,
   };
 }
 
-export function liveOutputTiming(timing: OutputTiming, now: number): RecentOutputMetrics {
-  const firstTokenAt = timing.firstTokenAt ?? now;
-  const generationMs = now - firstTokenAt;
-  const estimatedTokens = estimateStreamingOutputTokens(timing);
+/** Use provider-reported output tokens and only the observed streaming interval. */
+export function completeOutputTiming(
+  timing: OutputTiming,
+  outputTokens?: number,
+): RecentOutputMetrics | null {
+  const firstTokenAt = timing.firstTokenAt;
+  if (firstTokenAt === undefined) return null;
+  const generationMs = (timing.lastOutputAt ?? firstTokenAt) - firstTokenAt;
+  const hasActualTokenCount = typeof outputTokens === "number" && Number.isFinite(outputTokens) && outputTokens > 0;
   return {
     ttftMs: Math.max(0, firstTokenAt - timing.requestStartedAt),
     tokensPerSecond:
-      estimatedTokens > 0 && generationMs > 0 ? estimatedTokens * 1000 / generationMs : undefined,
-    estimated: true,
+      hasActualTokenCount && generationMs > 0 ? outputTokens * 1000 / generationMs : undefined,
   };
 }
 
@@ -152,8 +116,8 @@ export function formatSeconds(milliseconds: number): string {
 }
 
 export function formatRecentOutput(metrics: RecentOutputMetrics): string {
-  const rate = metrics.tokensPerSecond;
-  const estimateMarker = metrics.estimated ? "~" : "";
-  const rateText = rate === undefined ? "" : ` ${estimateMarker}${rate < 10 ? rate.toFixed(1) : Math.round(rate)}t/s`;
+  const rateText = metrics.tokensPerSecond === undefined
+    ? ""
+    : ` ${metrics.tokensPerSecond < 10 ? metrics.tokensPerSecond.toFixed(1) : Math.round(metrics.tokensPerSecond)}t/s`;
   return `${formatSeconds(metrics.ttftMs)}${rateText}`;
 }

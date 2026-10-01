@@ -3,24 +3,28 @@ import test from "node:test";
 
 import {
   completeOutputTiming,
-  createOutputMetricsTicker,
   createOutputTiming,
-  estimateStreamingOutputTokens,
+  firstTokenMetrics,
   formatRecentOutput,
-  liveOutputTiming,
   observeOutputEvent,
+  retainPreviousTokenRate,
 } from "./output-metrics.ts";
 
 const emptyMessage: any = { content: [] };
 
-test("captures the first hidden reasoning delta before visible text", () => {
+test("captures hidden reasoning first and exposes TTFT without dropping the prior TPS", () => {
   const timing = createOutputTiming(100);
   const thinking: any = { type: "thinking_delta", contentIndex: 0, delta: "hidden", partial: {} };
   const text: any = { type: "text_delta", contentIndex: 1, delta: "answer", partial: {} };
   assert.equal(observeOutputEvent(timing, thinking, emptyMessage, 450), true);
+
+  const immediate = retainPreviousTokenRate(firstTokenMetrics(timing)!, {
+    ttftMs: 700,
+    tokensPerSecond: 52,
+  });
+  assert.deepEqual(immediate, { ttftMs: 350, tokensPerSecond: 52 });
+  assert.equal(formatRecentOutput(immediate), "0.35s 52t/s");
   assert.equal(observeOutputEvent(timing, text, emptyMessage, 800), false);
-  assert.equal(timing.firstTokenAt, 450);
-  assert.equal(formatRecentOutput(liveOutputTiming(timing, 450)), "0.35s");
 });
 
 test("uses complete redacted thinking at block start and visible text as fallback", () => {
@@ -40,84 +44,63 @@ test("does not mistake a late reasoning summary for TTFT or double-count end eve
   const thinkingDelta: any = { type: "thinking_delta", contentIndex: 1, delta: "start", partial: {} };
   const thinkingEnd: any = { type: "thinking_end", contentIndex: 1, content: "start", partial: {} };
   assert.equal(observeOutputEvent(timing, lateThinking, emptyMessage, 200), false);
+  assert.equal(timing.lastOutputAt, 200);
   assert.equal(observeOutputEvent(timing, thinkingDelta, emptyMessage, 400), true);
-  const beforeEnd = estimateStreamingOutputTokens(timing);
   assert.equal(observeOutputEvent(timing, thinkingEnd, emptyMessage, 500), false);
-  assert.equal(estimateStreamingOutputTokens(timing), beforeEnd);
+  assert.equal(timing.lastOutputAt, 400);
 });
 
-test("estimates live t/s and finalizes with provider-reported output usage", () => {
+test("uses actual output tokens over first-to-last stream time, excluding TTFT and finalization", () => {
   const timing = createOutputTiming(100);
-  const text: any = { type: "text_delta", contentIndex: 0, delta: "This is a streaming response.", partial: {} };
-  assert.equal(observeOutputEvent(timing, text, emptyMessage, 500), true);
-  const live = liveOutputTiming(timing, 1500);
-  assert.equal(live.ttftMs, 400);
-  assert.equal(live.estimated, true);
-  assert.match(formatRecentOutput(live), /^0\.40s ~[\d.]+t\/s$/);
+  const first: any = { type: "text_delta", contentIndex: 0, delta: "Response", partial: {} };
+  const last: any = { type: "text_delta", contentIndex: 0, delta: " continues", partial: {} };
+  assert.equal(observeOutputEvent(timing, first, emptyMessage, 500), true);
+  observeOutputEvent(timing, last, emptyMessage, 1000);
 
-  const final = completeOutputTiming(timing, 1500, 200);
-  assert.deepEqual(final, { ttftMs: 400, tokensPerSecond: 200 });
-  assert.equal(formatRecentOutput(final!), "0.40s 200t/s");
+  const final = completeOutputTiming(timing, 200);
+  assert.deepEqual(final, { ttftMs: 400, tokensPerSecond: 400 });
+  assert.equal(formatRecentOutput(final!), "0.40s 400t/s");
 });
 
-test("counts tool wait toward the next TTFT but not the previous output rate", () => {
+test("assigns tool/server wait to next TTFT, not the previous request TPS", () => {
   const toolStartedAt = 100;
   const nextRequestAt = 900;
   const firstNextTokenAt = 1100;
   const timing = createOutputTiming(toolStartedAt);
-  const delta: any = { type: "text_delta", contentIndex: 0, delta: "next response", partial: {} };
-  observeOutputEvent(timing, delta, emptyMessage, firstNextTokenAt);
+  const first: any = { type: "text_delta", contentIndex: 0, delta: "next response", partial: {} };
+  const last: any = { type: "text_delta", contentIndex: 0, delta: " continues", partial: {} };
+  observeOutputEvent(timing, first, emptyMessage, firstNextTokenAt);
+  observeOutputEvent(timing, last, emptyMessage, 2100);
 
-  const metrics = completeOutputTiming(timing, 2100, 100);
+  const metrics = completeOutputTiming(timing, 100);
   const toolWaitMs = nextRequestAt - toolStartedAt;
   const nextRequestLatencyMs = firstNextTokenAt - nextRequestAt;
   assert.equal(metrics?.ttftMs, toolWaitMs + nextRequestLatencyMs);
-  assert.equal(metrics?.tokensPerSecond, 100); // only first token → response end
+  assert.equal(metrics?.tokensPerSecond, 100);
 });
 
-test("falls back to an estimated final rate only when provider usage is absent", () => {
+test("does not invent TPS when exact token usage is unavailable", () => {
   const timing = createOutputTiming(0);
-  const delta: any = { type: "text_delta", contentIndex: 0, delta: "Hello", partial: {} };
-  observeOutputEvent(timing, delta, emptyMessage, 250);
-  const final = completeOutputTiming(timing, 1250);
-  assert.equal(final?.estimated, true);
-  assert.match(formatRecentOutput(final!), /^0\.25s ~[\d.]+t\/s$/);
-  assert.equal(completeOutputTiming(createOutputTiming(0), 100, 10), null);
-});
+  const first: any = { type: "text_delta", contentIndex: 0, delta: "partial output", partial: {} };
+  const last: any = { type: "text_delta", contentIndex: 0, delta: " more", partial: {} };
+  observeOutputEvent(timing, first, emptyMessage, 250);
+  observeOutputEvent(timing, last, emptyMessage, 750);
 
-test("uses compact CJK-friendly live token estimates", () => {
-  const timing = createOutputTiming(0);
-  const cjk: any = { type: "text_delta", contentIndex: 0, delta: "你好世界", partial: {} };
-  observeOutputEvent(timing, cjk, emptyMessage, 100);
-  assert.equal(estimateStreamingOutputTokens(timing), 4);
-});
-
-test("refreshes at one-second intervals and stops cleanly", () => {
-  let scheduledCallback: (() => void) | undefined;
-  let scheduleCount = 0;
-  let cancelCount = 0;
-  const ticker = createOutputMetricsTicker(
-    ((callback: () => void, delay: number) => {
-      assert.equal(delay, 1000);
-      scheduledCallback = callback;
-      scheduleCount++;
-      return {} as ReturnType<typeof setInterval>;
-    }) as typeof setInterval,
-    (() => { cancelCount++; }) as typeof clearInterval,
+  const incomplete = completeOutputTiming(timing, undefined);
+  assert.deepEqual(incomplete, { ttftMs: 250, tokensPerSecond: undefined });
+  assert.equal(formatRecentOutput(incomplete!), "0.25s");
+  assert.deepEqual(
+    retainPreviousTokenRate(incomplete!, { ttftMs: 900, tokensPerSecond: 61 }),
+    { ttftMs: 250, tokensPerSecond: 61 },
   );
+  assert.equal(completeOutputTiming(createOutputTiming(0), 10), null);
+});
 
-  let ticks = 0;
-  const refresh = () => { ticks++; };
-  ticker.start(refresh);
-  ticker.start(refresh);
-  assert.equal(scheduleCount, 1);
-  scheduledCallback?.();
-  assert.equal(ticks, 1);
-  ticker.stop();
-  ticker.stop();
-  assert.equal(cancelCount, 1);
-  ticker.start(refresh);
-  assert.equal(scheduleCount, 2);
-  ticker.stop();
-  assert.equal(cancelCount, 2);
+test("uses partial actual usage for interrupted responses when provided", () => {
+  const timing = createOutputTiming(0);
+  const first: any = { type: "text_delta", contentIndex: 0, delta: "partial", partial: {} };
+  const last: any = { type: "text_delta", contentIndex: 0, delta: " output", partial: {} };
+  observeOutputEvent(timing, first, emptyMessage, 100);
+  observeOutputEvent(timing, last, emptyMessage, 600);
+  assert.deepEqual(completeOutputTiming(timing, 25), { ttftMs: 100, tokensPerSecond: 50 });
 });
