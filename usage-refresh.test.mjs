@@ -11,7 +11,8 @@ const chunk = readdirSync(chunksDir).find((name) => name.endsWith('.js') &&
 assert.ok(chunk, 'Installed Pi bundle is not available');
 const { discoverAndLoadExtensions } = await import(pathToFileURL(join(chunksDir, chunk)).href);
 
-test('usage refreshes after each assistant message, including tool-call turns', async () => {
+test('assistant-message refreshes include tool calls but reuse the shared 60-second cache', async () => {
+  const previousNow = Date.now;
   const previousProfile = process.env.USERPROFILE;
   const previousCodexHome = process.env.CODEX_HOME;
   const previousFetch = globalThis.fetch;
@@ -28,6 +29,8 @@ test('usage refreshes after each assistant message, including tool-call turns', 
   process.env.USERPROFILE = testHome;
   process.env.CODEX_HOME = codexHome;
 
+  let now = 1_700_000_000_000;
+  Date.now = () => now;
   let fetchCount = 0;
   globalThis.fetch = async () => {
     fetchCount++;
@@ -64,17 +67,25 @@ test('usage refreshes after each assistant message, including tool-call turns', 
     assert.equal(fetchCount, 1, 'session start performs an initial usage fetch');
 
     await emit('message_end', { type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse' } });
-    assert.equal(fetchCount, 2, 'tool-call assistant message refreshes usage despite the normal cache');
+    assert.equal(fetchCount, 1, 'tool-call assistant message checks usage but reuses the fresh cache');
 
     await emit('message_end', { type: 'message_end', message: { role: 'toolResult' } });
-    assert.equal(fetchCount, 2, 'tool results are not provider interactions');
+    assert.equal(fetchCount, 1, 'tool results are not provider interactions');
 
     await emit('message_end', { type: 'message_end', message: { role: 'assistant', stopReason: 'stop' } });
-    assert.equal(fetchCount, 3, 'assistant response after the tool call refreshes usage again');
+    assert.equal(fetchCount, 1, 'assistant response after the tool call still uses the cache');
+
+    now += 60_001;
+    await Promise.all([
+      emit('message_end', { type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse' } }),
+      emit('message_end', { type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse' } }),
+    ]);
+    assert.equal(fetchCount, 2, 'after cache expiry, concurrent interaction refreshes share one request');
 
     await emit('agent_end', { type: 'agent_end', messages: [] });
-    assert.equal(fetchCount, 3, 'agent_end no longer issues a duplicate refresh');
+    assert.equal(fetchCount, 2, 'agent_end does not issue a duplicate refresh');
   } finally {
+    Date.now = previousNow;
     globalThis.fetch = previousFetch;
     if (previousProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousProfile;

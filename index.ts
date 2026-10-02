@@ -330,6 +330,7 @@ async function fetchUsage(src: TokenSource): Promise<UsageData> {
 export default function (pi: ExtensionAPI) {
   let tokenSrc: TokenSource | null = null;
   let usage: UsageData | null = null;
+  let usageRequest: Promise<UsageData> | null = null;
   let footerOn = false;
   let footerGeneration = 0;
   let _tui: any = null;
@@ -340,13 +341,17 @@ export default function (pi: ExtensionAPI) {
   let pendingToolWaitStartedAt: number | null = null;
   let recentOutputMetrics: RecentOutputMetrics | null = null;
 
-  async function getUsage(forceRefresh = false): Promise<UsageData> {
+  async function getUsage(): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
       "Codex credentials not found. Sign in with `codex login` or pi `/auth openai-codex`.",
     );
-    if (!forceRefresh && usage && Date.now() - usage._ts < CACHE_MS) return usage;
-    usage = await fetchUsage(tokenSrc);
-    return usage;
+    if (usage && Date.now() - usage._ts < CACHE_MS) return usage;
+    if (usageRequest) return usageRequest;
+    const source = tokenSrc;
+    usageRequest = fetchUsage(source)
+      .then((fresh) => { usage = fresh; return fresh; })
+      .finally(() => { usageRequest = null; });
+    return usageRequest;
   }
 
   function isCodex(ctx: any) {
@@ -396,13 +401,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Refresh ─────────────────────────────────────────────────
-  async function refresh(ctx: any, forceRefresh = false) {
+  async function refresh(ctx: any) {
     if (!tokenSrc) return;
     if (!isCodex(ctx)) {
       if (usage) { usage = null; toggleFooter(ctx); }
       return;
     }
-    try { await getUsage(forceRefresh); trigger(); } catch { /* silent */ }
+    try { await getUsage(); trigger(); } catch { /* silent */ }
   }
 
   // ── Footer ──────────────────────────────────────────────────
@@ -579,8 +584,8 @@ export default function (pi: ExtensionAPI) {
     if (event.message?.role !== "assistant") return;
     finishOutputTiming(event.message);
     // Assistant messages ending in tool calls are separate provider interactions
-    // too, so refresh quota usage here rather than waiting for agent_end.
-    if (tokenSrc) await refresh(ctx, true);
+    // too. Check for an update here; getUsage keeps requests within its 60s cache.
+    if (tokenSrc) await refresh(ctx);
   });
 
   // A tool's server/processing time belongs to the next response's TTFT, not
