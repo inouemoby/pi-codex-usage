@@ -340,11 +340,11 @@ export default function (pi: ExtensionAPI) {
   let pendingToolWaitStartedAt: number | null = null;
   let recentOutputMetrics: RecentOutputMetrics | null = null;
 
-  async function getUsage(): Promise<UsageData> {
+  async function getUsage(forceRefresh = false): Promise<UsageData> {
     if (!tokenSrc) throw new Error(
       "Codex credentials not found. Sign in with `codex login` or pi `/auth openai-codex`.",
     );
-    if (usage && Date.now() - usage._ts < CACHE_MS) return usage;
+    if (!forceRefresh && usage && Date.now() - usage._ts < CACHE_MS) return usage;
     usage = await fetchUsage(tokenSrc);
     return usage;
   }
@@ -396,13 +396,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Refresh ─────────────────────────────────────────────────
-  async function refresh(ctx: any) {
+  async function refresh(ctx: any, forceRefresh = false) {
     if (!tokenSrc) return;
     if (!isCodex(ctx)) {
       if (usage) { usage = null; toggleFooter(ctx); }
       return;
     }
-    try { await getUsage(); trigger(); } catch { /* silent */ }
+    try { await getUsage(forceRefresh); trigger(); } catch { /* silent */ }
   }
 
   // ── Footer ──────────────────────────────────────────────────
@@ -575,8 +575,12 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("message_end", async (event: any) => {
-    if (event.message?.role === "assistant") finishOutputTiming(event.message);
+  pi.on("message_end", async (event: any, ctx: any) => {
+    if (event.message?.role !== "assistant") return;
+    finishOutputTiming(event.message);
+    // Assistant messages ending in tool calls are separate provider interactions
+    // too, so refresh quota usage here rather than waiting for agent_end.
+    if (tokenSrc) await refresh(ctx, true);
   });
 
   // A tool's server/processing time belongs to the next response's TTFT, not
@@ -635,7 +639,6 @@ export default function (pi: ExtensionAPI) {
       finishOutputTiming(lastAssistant);
     }
     pendingToolWaitStartedAt = null;
-    if (tokenSrc) refresh(ctx);
   });
 
   // ── /codex ───────────────────────────────────────────────
