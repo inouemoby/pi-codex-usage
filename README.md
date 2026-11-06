@@ -54,6 +54,22 @@ When using a Codex / ChatGPT-backed model, the footer shows:
   that provider/model. It reflects the setting only; returned service-tier fields
   are not used to add warning markers or claim which processing tier was used.
 
+## Quota Display
+
+The footer shows used percentages by default. To show remaining quota instead,
+add this to `~/.pi/agent/settings.json` or the project `.pi/settings.json`:
+
+```json
+{
+  "codexUsage": {
+    "quotaDisplay": "remaining"
+  }
+}
+```
+
+Set `quotaDisplay` to `"used"` to keep the default. Pacing flags still reflect
+used quota, and `/codex` continues to show both used and remaining percentages.
+
 ## Quota Details
 
 - **5h window**: Rolling burst limit — even with weekly quota left, sending too many requests inside 5 hours triggers throttling.

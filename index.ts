@@ -1,5 +1,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  readStoredCredential,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   getFastTierMarker,
@@ -16,6 +20,10 @@ import {
   type RecentOutputMetrics,
 } from "./output-metrics.ts";
 import { getCodexGptContextWindow } from "./codex-context-window.ts";
+import {
+  displayQuotaPercent,
+  resolveQuotaDisplayMode,
+} from "./quota-display.ts";
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
 
@@ -328,6 +336,11 @@ async function fetchUsage(src: TokenSource): Promise<UsageData> {
 
 // ─── Main ────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
+  const settings = SettingsManager.create(process.cwd()).getSettings();
+  const codexUsageSettings = (settings as unknown as { codexUsage?: unknown })
+    .codexUsage;
+  const quotaDisplayMode = resolveQuotaDisplayMode(codexUsageSettings);
+
   // Last footer usage line shared on pi.events for other extensions (e.g. pi-remotecontrol).
   let lastPublishedFooterUsage = "";
   let tokenSrc: TokenSource | null = null;
@@ -506,12 +519,20 @@ export default function (pi: ExtensionAPI) {
             if (usage.fiveHourPercent >= 0) {
               const sev = usageSeverity(usage.fiveHourPercent, FIVE_HOUR_MS, usage.fiveHourResetMs);
               const flag = sev === 2 ? "!!" : sev === 1 ? "!" : "";
-              parts.push(`${flag}5h:${usage.fiveHourPercent}%`);
+              const percent = displayQuotaPercent(
+                usage.fiveHourPercent,
+                quotaDisplayMode,
+              );
+              parts.push(`${flag}5h:${percent}%`);
             }
             if (usage.weeklyPercent >= 0) {
               const sev = usageSeverity(usage.weeklyPercent, WEEK_MS, usage.weeklyResetMs);
               const flag = sev === 2 ? "!!" : sev === 1 ? "!" : "";
-              parts.push(`${flag}wk:${usage.weeklyPercent}%`);
+              const percent = displayQuotaPercent(
+                usage.weeklyPercent,
+                quotaDisplayMode,
+              );
+              parts.push(`${flag}wk:${percent}%`);
             }
           }
           // Place response timing immediately after weekly usage.
