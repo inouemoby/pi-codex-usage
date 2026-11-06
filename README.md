@@ -50,9 +50,10 @@ When using a Codex / ChatGPT-backed model, the footer shows:
 - `wk:1%` — weekly quota (resets every 7 days), same pacing flags
 - `0.42s 57t/s` — first value is the most recent provider response's first-token latency; `t/s` is output speed. TTFT appears immediately at the first hidden reasoning event when available, otherwise at the first visible text/tool-call event; the previously completed TPS remains visible until this response completes. At each response boundary (including tool calls and aborted streams), TPS uses the provider-reported output-token count divided by the first-to-last observed output interval, excluding TTFT and response-finalization tail. Tool execution/server wait is carried into the next response's TTFT, not the preceding response's speed. If actual output-token usage is unavailable, the prior TPS is retained rather than estimated.
 - When space is tight, cumulative input/output token totals are omitted after cache and cost counters.
-- `⚡` appears immediately after the model name when fast mode is enabled for
-  that provider/model. It reflects the setting only; returned service-tier fields
-  are not used to add warning markers or claim which processing tier was used.
+- `⚡` appears immediately after the model name when a fast tier is enabled for
+  that provider/model. It follows `pi-service-tier` widget events and its
+  `pi-service-tier:state` event. It shows the requested tier, not which tier the
+  provider actually used.
 
 ## Quota Details
 

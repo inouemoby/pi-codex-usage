@@ -3,6 +3,7 @@ import { type ExtensionAPI, readStoredCredential } from "@earendil-works/pi-codi
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   getFastTierMarker,
+  getServiceTierWidgetState,
   type FastTierStatus,
 } from "./service-tier-marker.ts";
 import {
@@ -401,6 +402,18 @@ export default function (pi: ExtensionAPI) {
     fastTierStatus =
       state && typeof state.provider === "string" && typeof state.modelId === "string"
         ? { provider: state.provider, modelId: state.modelId, fast: state.fast === true }
+        : undefined;
+    trigger();
+  });
+
+  pi.events.on("pi-fancy-footer:widget", (payload: unknown) => {
+    const active = getServiceTierWidgetState(payload);
+    if (active === undefined) return;
+
+    const model = latestCtx?.model;
+    fastTierStatus =
+      typeof model?.provider === "string" && typeof model?.id === "string"
+        ? { provider: model.provider, modelId: model.id, fast: active }
         : undefined;
     trigger();
   });
