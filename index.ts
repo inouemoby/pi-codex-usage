@@ -567,8 +567,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Events ─────────────────────────────────────────────────
-  // Flex is an OpenAI API service tier. The ChatGPT subscription/Codex
-  // endpoint rejects it, so never add it to openai-codex requests.
+  // Flex is an OpenAI API-billing service tier. It is rejected (400) by
+  // ChatGPT subscription sign-in, so never add it to openai-codex requests
+  // or when the `openai` credential is OAuth (ChatGPT subscription).
   pi.on("before_provider_request", async (event: any, ctx: any) => {
     const requestStartedAt = performance.now();
     outputTiming = isCodex(ctx)
@@ -582,6 +583,10 @@ export default function (pi: ExtensionAPI) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return payload;
     }
+    try {
+      const cred = readStoredCredential("openai");
+      if (cred?.type === "oauth") return event.payload;
+    } catch { /* fall through and add flex */ }
     return { ...(payload as Record<string, unknown>), service_tier: "flex" };
   });
 
